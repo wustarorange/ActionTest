@@ -1,0 +1,71 @@
+name: CD - Deploy to GKE
+
+on:
+  workflow_run:
+    workflows: ["CI - Build and Push"]
+    branches: [main]
+    types:
+      - completed
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
+  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  REGION: asia-east1
+  REPOSITORY: hello-world
+
+jobs:
+  deploy:
+    name: Deploy to GKE
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GKE Credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_ZONE }}
+
+      - name: Update Kubernetes manifests with image tags
+        run: |
+          sed -i "s|REGION-docker.pkg.dev/PROJECT_ID|${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}|g" k8s/backend-deployment.yaml
+          sed -i "s|REGION-docker.pkg.dev/PROJECT_ID|${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}|g" k8s/frontend-deployment.yaml
+          sed -i "s|:latest|:${{ github.event.workflow_run.head_sha }}|g" k8s/backend-deployment.yaml
+          sed -i "s|:latest|:${{ github.event.workflow_run.head_sha }}|g" k8s/frontend-deployment.yaml
+
+      - name: Deploy to GKE
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/backend-deployment.yaml
+          kubectl apply -f k8s/backend-service.yaml
+          kubectl apply -f k8s/frontend-deployment.yaml
+          kubectl apply -f k8s/frontend-service.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Wait for Deployment
+        run: |
+          kubectl rollout status deployment/backend -n hello-world --timeout=120s
+          kubectl rollout status deployment/frontend -n hello-world --timeout=120s
+
+      - name: Get Ingress IP
+        run: |
+          echo "Waiting for Ingress IP..."
+          sleep 30
+          kubectl get ingress hello-world-ingress -n hello-world -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
