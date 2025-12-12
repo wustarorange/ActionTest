@@ -11,8 +11,8 @@ env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GKE_CLUSTER: ${{ secrets.GKE_CLUSTER }}
   GKE_ZONE: ${{ secrets.GKE_ZONE }}
-  REGION: asia-east1
-  REPOSITORY: hello-world
+  REGION: ${{ secrets.GCP_REGION }}
+  REPOSITORY: ${{ secrets.GCP_REPOSITORY }}
 
 jobs:
   deploy:
